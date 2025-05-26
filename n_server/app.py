@@ -1,12 +1,11 @@
-from flask import Flask, render_template
-from flask_socketio import SocketIO
+from flask import Flask
 from simulator.start_manager import start_market
 from routes.stock_routes import stock_bp, init_routes
 from simulator.config import COMPANIES
 from websocket.web_socket_api import create_websocket_manager
 import logging  # flask.logging 대신 기본 logging 모듈 사용
 
-
+#
 # Flask 앱 생성
 app = Flask(__name__)
 

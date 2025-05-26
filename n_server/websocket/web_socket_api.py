@@ -2,6 +2,7 @@
 import time
 import threading
 
+from flask import logging
 from flask_socketio import SocketIO
 from simulator.config import UPDATE_INTERVAL
 
