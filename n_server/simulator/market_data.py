@@ -16,10 +16,10 @@ class MarketData:
         # 캔들 데이터 초기화
         self.candle_data = {
             company: {
-                'day': deque(maxlen=15),
-                'week': deque(maxlen=7),
-                'month': deque(maxlen=30),
-                'quarter': deque(maxlen=30)
+                'day': deque(maxlen=90),
+                'week': deque(maxlen=90),
+                'month': deque(maxlen=90),
+                'quarter': deque(maxlen=90)
             }
             for company in COMPANIES
         }      

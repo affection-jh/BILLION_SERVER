@@ -134,37 +134,37 @@ def generate_candle_data(stock_data, candle_data):
         )
         
         if 'day' not in candle_data[comp]:
-            candle_data[comp]['day'] = deque(maxlen=15)  # 15개로 수정
-        for candle in day_candles[-15:]:  # 15개까지 저장
+            candle_data[comp]['day'] = deque(maxlen=90)
+        for candle in day_candles[-90:]:  # 90개까지 저장
             candle_data[comp]['day'].append(candle)
 
         # 상위 기간 캔들 생성을 위한 데이터
         day_candles_list = list(candle_data[comp]['day'])
 
-        # 주봉 생성 (5개 데이터 = 1개 캔들, 7개 저장)
+        # 주봉 생성 (5개 일봉 = 1개 캔들, 90개 저장)
         if len(day_candles_list) >= 5:
             week_candle = create_candle_from_data(day_candles_list, 5)
             if week_candle:
                 if 'week' not in candle_data[comp]:
-                    candle_data[comp]['week'] = deque(maxlen=7)
+                    candle_data[comp]['week'] = deque(maxlen=90)
                 if len(candle_data[comp]['week']) == 0 or week_candle["time"] > candle_data[comp]['week'][-1]["time"]:
                     candle_data[comp]['week'].append(week_candle)
 
-        # 월봉 생성 (5개 데이터 = 1개 캔들, 30개 저장)
-        if len(day_candles_list) >= 5:
-            month_candle = create_candle_from_data(day_candles_list, 5)
+        # 월봉 생성 (20개 일봉 = 1개 캔들, 90개 저장)
+        if len(day_candles_list) >= 20:
+            month_candle = create_candle_from_data(day_candles_list, 20)
             if month_candle:
                 if 'month' not in candle_data[comp]:
-                    candle_data[comp]['month'] = deque(maxlen=30)
+                    candle_data[comp]['month'] = deque(maxlen=90)
                 if len(candle_data[comp]['month']) == 0 or month_candle["time"] > candle_data[comp]['month'][-1]["time"]:
                     candle_data[comp]['month'].append(month_candle)
 
-        # 분기 캔들 생성 (15개 데이터 = 1개 캔들, 30개 저장)
-        if len(day_candles_list) >= 15:
-            quarter_candle = create_candle_from_data(day_candles_list, 15)
+        # 분기봉 생성 (60개 일봉 = 1개 캔들, 90개 저장)
+        if len(day_candles_list) >= 60:
+            quarter_candle = create_candle_from_data(day_candles_list, 60)
             if quarter_candle:
                 if 'quarter' not in candle_data[comp]:
-                    candle_data[comp]['quarter'] = deque(maxlen=30)
+                    candle_data[comp]['quarter'] = deque(maxlen=90)
                 if len(candle_data[comp]['quarter']) == 0 or quarter_candle["time"] > candle_data[comp]['quarter'][-1]["time"]:
                     candle_data[comp]['quarter'].append(quarter_candle)
 
