@@ -34,7 +34,7 @@ def sample_data(price_history, interval, period):
     start_time = last_time - target_range
     
     # 범위 내의 데이터만 필터링
-    period_data = [p for p in price_history if p["time"] >= start_time]
+    period_data = [p for p in list(price_history) if p["time"] >= start_time]
     if not period_data:
         return []
     
