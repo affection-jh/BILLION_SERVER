@@ -18,8 +18,10 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import com.nbillion.model.CandleData1Min;
 import com.nbillion.repository.CandleData1MinRepository;
+import org.springframework.stereotype.Component;
+import java.util.concurrent.ScheduledFuture;
 
-@Service
+@Component
 public class StockSimulator {
     
     // 시뮬레이션 상수 (변동률 대폭 감소)
@@ -30,6 +32,7 @@ public class StockSimulator {
     private final StockWebSocketHandler webSocketHandler;
     private final CompanyConfig companyConfig;
     private final CandleData1MinRepository candle1MinRepo;
+    private final SimpleCandleManager candleManager; // 파이썬 스타일 캔들 매니저 추가
     
     // 주식 상태 관리
     private final Map<String, Company> companies = new ConcurrentHashMap<>();
@@ -37,6 +40,13 @@ public class StockSimulator {
     private final Map<String, Double> currentPrices = new ConcurrentHashMap<>();
     private final Map<String, Double> previousPrices = new ConcurrentHashMap<>();
     private final Map<String, Double> previousDayClose = new ConcurrentHashMap<>();
+    
+    // 시가 저장용 (상승률 계산을 위해)
+    private final Map<String, Double> todayOpenPrices = new ConcurrentHashMap<>();
+    
+    // 기간별 기준 가격 (변동률 계산용)
+    private final Map<String, Double> weekAgoPrices = new ConcurrentHashMap<>();
+    private final Map<String, Double> monthAgoPrices = new ConcurrentHashMap<>();
     
     // 실시간 인기 주식 리스트 (상승률 높은 5개) - 동적 선정
     private final List<String> trendingStocks = new ArrayList<>();
@@ -69,9 +79,18 @@ public class StockSimulator {
     private final Map<String, Integer> buyPressure = new ConcurrentHashMap<>();
     private final Map<String, LocalDateTime> lastBuyTime = new ConcurrentHashMap<>();
     
-
+    // 개별 주식 업데이트 타이머
+    private final Map<String, ScheduledFuture<?>> individualStockTimers = new ConcurrentHashMap<>();
     
+    // 배치 전송 타이머
+    private ScheduledFuture<?> batchSender;
     
+    // 배치 업데이트 저장소 (파이썬과 동일한 구조)
+    private final Map<String, Double> batchUpdates = new ConcurrentHashMap<>();
+    
+    // 파이썬 서버와 동일한 설정
+    private static final double UPDATE_INTERVAL = 0.8; // 0.8초마다 업데이트 (빠른 반응)
+    private static final int ONE_DAY_SECONDS = 1440; // 1440분 = 1일 (0.8초 = 1분, 1440분 = 1일)
     
     /**
      * 주식 상태 클래스
@@ -202,40 +221,30 @@ public class StockSimulator {
         }
     }
 
-    public StockSimulator(StockWebSocketHandler webSocketHandler, CompanyConfig companyConfig, CandleData1MinRepository candle1MinRepo) {
+    public StockSimulator(StockWebSocketHandler webSocketHandler, 
+                         CompanyConfig companyConfig, 
+                         CandleData1MinRepository candle1MinRepo,
+                         SimpleCandleManager candleManager) { // 생성자에 추가
         this.webSocketHandler = webSocketHandler;
         this.companyConfig = companyConfig;
         this.candle1MinRepo = candle1MinRepo;
+        this.candleManager = candleManager; // 주입
     }
 
     @PostConstruct
     public void initialize() {
-        System.out.println("🚀 주식 시뮬레이션 서버 초기화 시작...");
+        System.out.println("🚀 주식 시뮬레이터 초기화 시작...");
         
-        // 1. 회사 데이터 초기화
+        // 회사 목록 초기화
         initializeCompanies();
         
-        // 2. 데이터베이스에서 가격 복원
-        restorePricesFromDatabase();
+        // 간단한 캔들 매니저 초기화
+        initializeSimpleCandleManager();
         
-        // 3. 캔들 누적기 초기화
-        initializeCandleAccumulators();
+        // 개별 주식 업데이트 시작 (파이썬과 동일한 주기)
+        startIndividualStockUpdates();
         
-        // 4. 이전 날 데이터 생성 (필요시)
-        generatePreviousDayDataIfNeeded();
-        
-        // 5. 대장주 및 홈화면 종목 선정
-        updateRecommendedStocks();
-        
-        // 6. 스케줄러 시작
-        startCandleGeneration();
-        startAdvancedPriceSimulation();
-        
-        // 7. 매수 압력 시뮬레이션 시작 (돈 읽는 사람들 + 내가 사면 떨어져)
-        simulateBuyPressure();
-        
-        System.out.println("✅ 주식 시뮬레이션 서버 초기화 완료!");
-        System.out.println("💰 매수 압력 시뮬레이션 활성화 - 돈 읽는 사람들 구현!");
+        System.out.println("✅ 주식 시뮬레이터 초기화 완료!");
     }
 
     /**
@@ -342,6 +351,7 @@ public class StockSimulator {
             currentPrices.clear();
             previousPrices.clear();
             previousDayClose.clear(); // 전날 종가 초기화
+            todayOpenPrices.clear(); // 시가 초기화
             
             List<CompanyConfig.CompanyData> companyDataList = companyConfig.getCompanies();
             for (CompanyConfig.CompanyData companyData : companyDataList) {
@@ -370,9 +380,38 @@ public class StockSimulator {
                 currentPrices.put(company.getSymbol(), initialPrice);
                 previousPrices.put(company.getSymbol(), initialPrice);
                 
+                // 시가 설정 (현재가보다 약간 낮게 설정하여 상승률 생성)
+                double openPrice = initialPrice * ThreadLocalRandom.current().nextDouble(0.95, 1.05);
+                todayOpenPrices.put(company.getSymbol(), openPrice);
+                
                 // 전날 종가를 현재가보다 약간 다르게 설정 (변동률 생성을 위해)
-                double previousDayPrice = initialPrice * ThreadLocalRandom.current().nextDouble(0.95, 1.05);
+                // 더 균형잡힌 변동률 분포를 위해 가중치 랜덤 분포 사용
+                double changePercent;
+                double rand = Math.random();
+                if (rand < 0.4) { // 40% 확률로 작은 변동률 (-2% ~ +2%)
+                    changePercent = ThreadLocalRandom.current().nextDouble(-2.0, 2.0);
+                } else if (rand < 0.7) { // 30% 확률로 중간 변동률 (-5% ~ +5%)
+                    changePercent = ThreadLocalRandom.current().nextDouble(-5.0, 5.0);
+                } else if (rand < 0.85) { // 15% 확률로 큰 변동률 (-15% ~ +15%)
+                    changePercent = ThreadLocalRandom.current().nextDouble(-15.0, 15.0);
+                } else if (rand < 0.95) { // 10% 확률로 매우 큰 변동률 (-30% ~ +30%)
+                    changePercent = ThreadLocalRandom.current().nextDouble(-30.0, 30.0);
+                } else { // 5% 확률로 극단적 변동률 (-50% ~ +100%)
+                    if (Math.random() < 0.6) { // 상승 편향
+                        changePercent = ThreadLocalRandom.current().nextDouble(30.0, 100.0);
+                    } else { // 하락
+                        changePercent = ThreadLocalRandom.current().nextDouble(-50.0, -20.0);
+                    }
+                }
+                double previousDayPrice = initialPrice / (1 + changePercent / 100.0);
+                previousDayPrice = Math.max(previousDayPrice, initialPrice * 0.3); // 최소 30%까지만 하락
                 previousDayClose.put(company.getSymbol(), previousDayPrice);
+                
+                // 주봉, 월봉 기준 가격도 초기화 (랜덤한 과거 가격)
+                double weekAgoPrice = initialPrice * ThreadLocalRandom.current().nextDouble(0.8, 1.2);
+                double monthAgoPrice = initialPrice * ThreadLocalRandom.current().nextDouble(0.7, 1.3);
+                weekAgoPrices.put(company.getSymbol(), weekAgoPrice);
+                monthAgoPrices.put(company.getSymbol(), monthAgoPrice);
                 
                 // StockState 생성
                 StockState state = new StockState(company.getSymbol(), initialPrice);
@@ -383,8 +422,8 @@ public class StockSimulator {
                 
                 System.out.println("  ✅ " + company.getSymbol() + 
                                  ": 현재가=" + String.format("%.2f", initialPrice) + 
-                                 ", 전날종가=" + String.format("%.2f", previousDayPrice) + 
-                                 ", 변동률=" + String.format("%.2f", ((initialPrice - previousDayPrice) / previousDayPrice) * 100) + "%");
+                                 ", 시가=" + String.format("%.2f", openPrice) + 
+                                 ", 시가기준변동률=" + String.format("%.2f", ((initialPrice - openPrice) / openPrice) * 100) + "%");
             }
             
             System.out.println("✅ 회사 정보 초기화 완료: " + companies.size() + "개 종목");
@@ -497,33 +536,54 @@ public class StockSimulator {
     }
 
     /**
-     * 대장주 업데이트 (강력한 상승 편향 - 100-200% 목표)
+     * 대장주 업데이트 (강력한 상승 편향 - 50-400% 목표)
      */
     private void updateLeaderStock(String symbol) {
         double currentPrice = currentPrices.get(symbol);
         StockState state = stockStates.get(symbol);
         double newPrice;
         
-        // 평균회귀 적용 - 현재가가 평균의 3배 이상이면 강제 하락
-        if (currentPrice > state.longTermMean * 3.0) {
+        // 현재 상승률 계산
+        double currentSurgePercent = ((currentPrice - state.longTermMean) / state.longTermMean) * 100.0;
+        
+        // 평균회귀 적용 - 현재가가 평균의 5배 이상이면 강제 하락 (400% 이상)
+        if (currentPrice > state.longTermMean * 5.0) {
             double dropRate = ThreadLocalRandom.current().nextDouble(0.03, 0.08); // 3-8% 하락
             newPrice = currentPrice * (1 - dropRate);
-            System.out.println("📉 [" + symbol + "] 👑대장주 평균회귀 하락 -" + String.format("%.1f", dropRate * 100) + "% (점진적)");
+            System.out.println("📉 [" + symbol + "] 👑대장주 평균회귀 하락 -" + String.format("%.1f", dropRate * 100) + "% (현재상승률: " + String.format("%.1f", currentSurgePercent) + "%)");
         } else {
-            // 85% 확률로 상승, 15% 확률로 하락 (매우 강한 상승 편향)
-            if (Math.random() < 0.85) {
-                double surgeRate = ThreadLocalRandom.current().nextDouble(0.02, 0.06); // 2-6% 상승 (더 강하게)
+            // 95% 확률로 상승, 5% 확률로 하락 (더욱 강한 상승 편향)
+            if (Math.random() < 0.95) {
+                // 상승률에 따른 차등 적용 (더 높은 상승률)
+                double surgeRate;
+                if (currentSurgePercent < 50) {
+                    // 50% 미만: 5-12% 상승 (매우 빠른 상승)
+                    surgeRate = ThreadLocalRandom.current().nextDouble(0.05, 0.12);
+                } else if (currentSurgePercent < 100) {
+                    // 50-100%: 3-8% 상승 (빠른 상승)
+                    surgeRate = ThreadLocalRandom.current().nextDouble(0.03, 0.08);
+                } else if (currentSurgePercent < 200) {
+                    // 100-200%: 2-5% 상승 (중간 상승)
+                    surgeRate = ThreadLocalRandom.current().nextDouble(0.02, 0.05);
+                } else if (currentSurgePercent < 300) {
+                    // 200-300%: 1-3% 상승 (안정적 상승)
+                    surgeRate = ThreadLocalRandom.current().nextDouble(0.01, 0.03);
+                } else {
+                    // 300% 이상: 0.5-2% 상승 (조심스러운 상승)
+                    surgeRate = ThreadLocalRandom.current().nextDouble(0.005, 0.02);
+                }
+                
                 newPrice = currentPrice * (1 + surgeRate);
-                System.out.println("👑 [" + symbol + "] 대장주 급등! +" + String.format("%.1f", surgeRate * 100) + "% (점진적)");
+                System.out.println("👑 [" + symbol + "] 대장주 급등! +" + String.format("%.1f", surgeRate * 100) + "% (현재상승률: " + String.format("%.1f", currentSurgePercent) + "%)");
             } else {
-                double dropRate = ThreadLocalRandom.current().nextDouble(0.005, 0.02); // 0.5-2% 하락
+                double dropRate = ThreadLocalRandom.current().nextDouble(0.003, 0.008); // 0.3-0.8% 하락 (매우 작은 하락)
                 newPrice = currentPrice * (1 - dropRate);
-                System.out.println("📉 [" + symbol + "] 👑대장주 조정 -" + String.format("%.1f", dropRate * 100) + "% (점진적)");
+                System.out.println("📉 [" + symbol + "] 👑대장주 조정 -" + String.format("%.1f", dropRate * 100) + "% (현재상승률: " + String.format("%.1f", currentSurgePercent) + "%)");
             }
         }
         
         // 점진적 가격 변동 적용
-        applyGradualPriceChange(symbol, newPrice, ThreadLocalRandom.current().nextLong(300000, 800000)); // 높은 거래량
+        applyGradualPriceChange(symbol, newPrice, ThreadLocalRandom.current().nextLong(500000, 1200000)); // 더 높은 거래량
     }
 
     /**
@@ -586,48 +646,68 @@ public class StockSimulator {
     }
 
     /**
-     * 변동성 레벨 결정 (현실적 변동률로 조정)
+     * 변동성 레벨 결정 (안정적이고 균형잡힌 변동률)
      */
     private double determineVolatilityLevel(StockState state, String symbol) {
         double random = Math.random();
-        boolean isTrending = trendingStocks.contains(symbol);
+        boolean isLeader = leaderStocks.contains(symbol);
+        boolean isHighTrending = highTrendingStocks.contains(symbol);
+        boolean isMediumTrending = mediumTrendingStocks.contains(symbol);
         boolean isRecommended = homeRecommendedStocks.contains(symbol);
         
-        if (isTrending) {
-            // 새로운 인기주만 큰 변동, 기존 인기주는 평균 회귀
-            boolean isNewTrending = !previousTrendingStocks.contains(symbol);
-            
-            if (isNewTrending && random < 0.03) { // 2% → 3% 확률 증가
-                double surgeRate = ThreadLocalRandom.current().nextDouble(0.05, 0.1);
-                System.out.println("🚀 [" + symbol + "] 새로운 인기주 급등! " + String.format("%.1f", surgeRate * 100) + "%");
-                return surgeRate;
-            } else if (random < 0.15) { // 8% → 15% 확률 증가
-                double mediumRate = ThreadLocalRandom.current().nextDouble(0.01, 0.03);
-                return mediumRate;
-            } else { // 나머지 - 작은 변동 (0.1-1%)
-                double smallRate = ThreadLocalRandom.current().nextDouble(0.001, 0.01);
-                return smallRate;
+        if (isLeader) {
+            // 대장주: 개미털기용 화끈한 변동! 🔥
+            if (random < 0.08) { // 8% 확률로 극대 상승 (2% → 8%로 증가)
+                double extremeSurge = ThreadLocalRandom.current().nextDouble(0.05, 0.15);
+                System.out.println("🔥 [" + symbol + "] 대장주 극대 상승! 개미들 털기 시작! " + String.format("%.1f", extremeSurge * 100) + "%");
+                return extremeSurge;
+            } else if (random < 0.20) { // 12% 확률로 큰 상승 (13% → 20%로 증가)
+                double bigSurge = ThreadLocalRandom.current().nextDouble(0.03, 0.08);
+                System.out.println("👑 [" + symbol + "] 대장주 큰 상승! " + String.format("%.1f", bigSurge * 100) + "%");
+                return bigSurge;
+            } else if (random < 0.35) { // 15% 확률로 중간 상승
+                double mediumSurge = ThreadLocalRandom.current().nextDouble(0.015, 0.04);
+                return mediumSurge;
+            } else { // 65% 확률로 작은 변동 (83% → 65%로 감소)
+                double smallChange = ThreadLocalRandom.current().nextDouble(0.005, 0.02);
+                return smallChange;
             }
-        } else if (isRecommended) {
-            if (random < 0.08) { // 5% → 8% 확률 증가
-                double mediumRate = ThreadLocalRandom.current().nextDouble(0.01, 0.03);
-                return mediumRate;
-            } else { // 나머지 - 작은 변동 (0.1-1%)
-                double smallRate = ThreadLocalRandom.current().nextDouble(0.001, 0.01);
-                return smallRate;
+        } else if (isHighTrending) {
+            // 일반 인기주: 20-60% 상승 범위
+            if (random < 0.03) { // 3% 확률로 큰 상승
+                double bigSurge = ThreadLocalRandom.current().nextDouble(0.02, 0.05);
+                System.out.println("🚀 [" + symbol + "] 인기주 큰 상승! " + String.format("%.1f", bigSurge * 100) + "%");
+                return bigSurge;
+            } else if (random < 0.20) { // 17% 확률로 중간 상승
+                double mediumSurge = ThreadLocalRandom.current().nextDouble(0.008, 0.02);
+                return mediumSurge;
+            } else { // 80% 확률로 작은 변동
+                double smallChange = ThreadLocalRandom.current().nextDouble(0.001, 0.008);
+                return smallChange;
+            }
+        } else if (isMediumTrending) {
+            // 나머지 인기주: 5-25% 상승 범위
+            if (random < 0.05) { // 5% 확률로 중간 상승
+                double mediumSurge = ThreadLocalRandom.current().nextDouble(0.01, 0.025);
+                return mediumSurge;
+            } else if (random < 0.25) { // 20% 확률로 작은 상승
+                double smallSurge = ThreadLocalRandom.current().nextDouble(0.003, 0.01);
+                return smallSurge;
+            } else { // 75% 확률로 매우 작은 변동
+                double tinyChange = ThreadLocalRandom.current().nextDouble(0.0005, 0.005);
+                return tinyChange;
             }
         } else {
-            // 일반 종목 - 변동성 대폭 증가
-            if (random < 0.05) { // 1% → 5% 확률 대폭 증가
-                double occasionalRate = ThreadLocalRandom.current().nextDouble(0.01, 0.025); // 1-2% → 1-2.5%로 증가
-                System.out.println("📊 [" + symbol + "] 일반주 적절한 변동! " + String.format("%.1f", occasionalRate * 100) + "%");
-                return occasionalRate;
-            } else if (random < 0.25) { // 새로운 중간 변동 구간 추가 (20% 확률)
-                double regularRate = ThreadLocalRandom.current().nextDouble(0.005, 0.015); // 0.5-1.5% 변동
-                return regularRate;
-            } else { // 75% - 작은 변동 (0.1-0.8%)
-                double tinyRate = ThreadLocalRandom.current().nextDouble(0.001, 0.008); // 0.1-0.5% → 0.1-0.8%로 증가
-                return tinyRate;
+            // 일반 종목: 안정적이고 균형잡힌 변동 (변동성 낮춤)
+            if (random < 0.02) { // 2% 확률로 중간 변동 (5% → 2%로 감소)
+                double mediumChange = ThreadLocalRandom.current().nextDouble(0.005, 0.015);
+                return mediumChange;
+            } else if (random < 0.15) { // 13% 확률로 작은 변동 (20% → 13%로 감소)
+                double smallChange = ThreadLocalRandom.current().nextDouble(0.001, 0.005);
+                return smallChange;
+            } else { // 85% 확률로 매우 작은 변동 (75% → 85%로 증가)
+                double tinyChange = ThreadLocalRandom.current().nextDouble(0.0002, 0.002);
+                return tinyChange;
             }
         }
     }
@@ -655,8 +735,26 @@ public class StockSimulator {
             // 3. 변동성 레벨 결정 (종목별 차별화)
             double volatilityLevel = determineVolatilityLevel(state, state.name);
             
-            // 4. 변동성 적용 (방향성 랜덤)
-            double direction = Math.random() < 0.5 ? 1 : -1;
+            // 4. 변동성 적용 (더 균형잡힌 방향성)
+            double direction;
+            boolean isLeader = leaderStocks.contains(state.name);
+            boolean isHighTrending = highTrendingStocks.contains(state.name);
+            boolean isMediumTrending = mediumTrendingStocks.contains(state.name);
+            
+            if (isLeader) {
+                // 대장주: 75% 상승, 25% 하락 (조금 더 강한 상승)
+                direction = Math.random() < 0.95 ? 1 : -1;
+            } else if (isHighTrending) {
+                // 일반 인기주: 65% 상승, 35% 하락 (하락 확률 증가)
+                direction = Math.random() < 0.62 ? 1 : -1;
+            } else if (isMediumTrending) {
+                // 나머지 인기주: 60% 상승, 40% 하락 (하락 확률 증가)
+                direction = Math.random() < 0.52 ? 1 : -1;
+            } else {
+                // 일반 종목: 45% 상승, 45% 하락 (하락 확률 증가)
+                direction = Math.random() < 0.49 ? 1 : -1;
+            }
+            
             S = S * (1 + direction * volatilityLevel);
             
             // 5. 지지/저항선 계산
@@ -888,8 +986,8 @@ public class StockSimulator {
             return;
         }
         
-        // 개미털기: 1시간마다 3% 확률
-        if (secCount != 0 && secCount % 3600 == 0 && ThreadLocalRandom.current().nextDouble() < 0.03) {
+        // 개미털기: 1시간마다 4% 확률 (3% → 4%로 증가)
+        if (secCount != 0 && secCount % 3600 == 0 && ThreadLocalRandom.current().nextDouble() < 0.04) {
             if (state.priceHistory.size() > 100) {
                 // 변동성이 적을 때 발생
                 double recentVolatility = calculateRecentVolatility(state, S);
@@ -900,8 +998,18 @@ public class StockSimulator {
             }
         }
         
-        // 급등 후 급락: 2시간마다 4% 확률
-        if (secCount != 0 && secCount % 7200 == 0 && ThreadLocalRandom.current().nextDouble() < 0.04) {
+        // 대장주 전용 추가 개미털기: 30분마다 8% 확률
+        boolean isLeader = leaderStocks.contains(state.name);
+        if (isLeader && secCount != 0 && secCount % 1800 == 0 && ThreadLocalRandom.current().nextDouble() < 0.08) {
+            if (state.priceHistory.size() > 50) {
+                System.out.println("🔥 [" + state.name + "] 대장주 전용 개미털기 기회! 추가 털기 시작!");
+                triggerAntShakeEvent(state, S);
+                return;
+            }
+        }
+        
+        // 급등 후 급락: 2시간마다 5% 확률 (4% → 5%로 증가)
+        if (secCount != 0 && secCount % 7200 == 0 && ThreadLocalRandom.current().nextDouble() < 0.05) {
             triggerSurgeEvent(state, S);
         }
     }
@@ -916,8 +1024,16 @@ public class StockSimulator {
         event.timer = 0;
         event.duration = ThreadLocalRandom.current().nextInt(60, 121);
         event.startPrice = S;
-        event.dropRate = ThreadLocalRandom.current().nextDouble(0.9, 0.95);
-        System.out.println("🐜 [" + state.name + "] 개미털기 패턴 발생!");
+        
+        // 대장주는 더 화끈한 개미털기!
+        boolean isLeader = leaderStocks.contains(state.name);
+        if (isLeader) {
+            event.dropRate = ThreadLocalRandom.current().nextDouble(0.7, 0.85); // 15-30% 급락
+            System.out.println("🔥 [" + state.name + "] 대장주 개미털기 시작! 15-30% 급락 예정!");
+        } else {
+            event.dropRate = ThreadLocalRandom.current().nextDouble(0.9, 0.95); // 5-10% 급락
+            System.out.println("🐜 [" + state.name + "] 개미털기 패턴 발생!");
+        }
     }
 
     /**
@@ -930,9 +1046,17 @@ public class StockSimulator {
         event.timer = 0;
         event.duration = ThreadLocalRandom.current().nextInt(60, 121);
         event.startPrice = S;
-        event.surgeRate = ThreadLocalRandom.current().nextDouble(0.1, 0.15);
+        
+        // 대장주는 더 화끈한 급등!
+        boolean isLeader = leaderStocks.contains(state.name);
+        if (isLeader) {
+            event.surgeRate = ThreadLocalRandom.current().nextDouble(0.2, 0.4); // 20-40% 급등
+            System.out.println("🔥 [" + state.name + "] 대장주 화끈한 급등 시작! 20-40% 상승 예정!");
+        } else {
+            event.surgeRate = ThreadLocalRandom.current().nextDouble(0.1, 0.15); // 10-15% 급등
+            System.out.println("🚀 [" + state.name + "] 급등주 포착!");
+        }
         event.targetPrice = S * (1 + event.surgeRate);
-        System.out.println("🚀 [" + state.name + "] 급등주 포착!");
     }
 
     /**
@@ -1193,7 +1317,7 @@ public class StockSimulator {
     }
 
     /**
-     * 추천주 목록 업데이트 (홈화면용 10개 = 대장주 1개 + 일반인기주 2-3개 + 나머지인기주 6-7개)
+     * 추천주 목록 업데이트 (홈화면용 10개 = 대장주 1개 + 일반인기주 3개 + 나머지인기주 6개)
      */
     private void updateRecommendedStocks() {
         // 1. 전체 종목에서 랜덤 선택
@@ -1206,14 +1330,14 @@ public class StockSimulator {
         mediumTrendingStocks.clear();
         homeRecommendedStocks.clear();
         
-        // 3. 대장주 1개 (100-200% 상승)
+        // 3. 대장주 1개 (50-150% 상승) - 더 안정적인 범위
         if (allSymbols.size() >= 1) {
             leaderStocks.add(allSymbols.get(0));
             homeRecommendedStocks.addAll(leaderStocks);
         }
         
-        // 4. 일반 인기주 2-3개 (30-50% 상승) - 랜덤하게 2개 또는 3개
-        int highTrendingCount = ThreadLocalRandom.current().nextInt(2, 4); // 2 또는 3개
+        // 4. 일반 인기주 3개 (20-60% 상승) - 고정 3개로 설정
+        int highTrendingCount = 3;
         if (allSymbols.size() >= 1 + highTrendingCount) {
             for (int i = 1; i <= highTrendingCount && i < allSymbols.size(); i++) {
                 highTrendingStocks.add(allSymbols.get(i));
@@ -1221,7 +1345,7 @@ public class StockSimulator {
             homeRecommendedStocks.addAll(highTrendingStocks);
         }
         
-        // 5. 나머지 인기주 6-7개 (10-30% 상승) - 전체 10개가 되도록 조정
+        // 5. 나머지 인기주 6개 (5-25% 상승) - 더 안정적인 범위
         int remainingCount = 10 - leaderStocks.size() - highTrendingStocks.size();
         int startIndex = 1 + highTrendingCount;
         if (allSymbols.size() >= startIndex + remainingCount) {
@@ -1236,9 +1360,9 @@ public class StockSimulator {
         trendingStocks.addAll(homeRecommendedStocks);
         
         System.out.println("🏠 홈화면 구성 완료: 총 " + homeRecommendedStocks.size() + "개");
-        System.out.println("  👑 대장주: " + leaderStocks.size() + "개 (100-200% 상승) - " + leaderStocks);
-        System.out.println("  🚀 일반인기주: " + highTrendingStocks.size() + "개 (30-50% 상승) - " + highTrendingStocks);
-        System.out.println("  📈 나머지인기주: " + mediumTrendingStocks.size() + "개 (10-30% 상승) - " + mediumTrendingStocks);
+        System.out.println("  👑 대장주: " + leaderStocks.size() + "개 (50-400% 상승) - " + leaderStocks);
+        System.out.println("  🚀 일반인기주: " + highTrendingStocks.size() + "개 (20-60% 상승) - " + highTrendingStocks);
+        System.out.println("  📈 나머지인기주: " + mediumTrendingStocks.size() + "개 (5-25% 상승) - " + mediumTrendingStocks);
     }
     
     /**
@@ -1309,14 +1433,17 @@ public class StockSimulator {
     public Company getCompany(String symbol) {
         Company company = companies.get(symbol);
         if (company != null) {
-            // 현재 가격으로 업데이트된 정보 반환
+            double currentPrice = currentPrices.get(symbol);
+            double todayOpenPrice = todayOpenPrices.getOrDefault(symbol, currentPrice);
+            
+            // 현재 가격으로 업데이트된 정보 반환 (저장된 시가 사용)
             Company updatedCompany = Company.builder()
                     .symbol(company.getSymbol())
                     .name(company.getName())
                     .sector(company.getSector())
                     .description(company.getDescription())
-                    .open(company.getOpen())
-                    .close(currentPrices.get(symbol))
+                    .open(todayOpenPrice) // 저장된 시가 사용
+                    .close(currentPrice)
                     .volume(company.getVolume())
                     .turnover(company.getTurnover())
                     .per(company.getPer())
@@ -1720,5 +1847,230 @@ public class StockSimulator {
         System.out.println("🔄 [" + symbol + "] 점진적 변동: " + String.format("%.1f", totalChangePercent * 100) + "% → " + steps + "단계 (0.2초 간격)");
     }
 
+    private void startIndividualStockUpdates() {
+        System.out.println("🔄 산발적 개별 주식 업데이트 시작 (파이썬 스타일: 0.5초 주기)");
+        
+        // 각 주식마다 다른 시작 시간과 업데이트 확률을 설정
+        List<String> allSymbols = new ArrayList<>(companies.keySet());
+        Collections.shuffle(allSymbols); // 랜덤 순서로 섞기
+        
+        for (int i = 0; i < allSymbols.size(); i++) {
+            String symbol = allSymbols.get(i);
+            
+            // 각 주식마다 다른 시작 지연 시간 (0~2초 랜덤)
+            long initialDelay = ThreadLocalRandom.current().nextLong(0, 2000);
+            
+            ScheduledFuture<?> future = scheduler.scheduleAtFixedRate(
+                () -> {
+                    // 업데이트 확률을 랜덤하게 설정 (30%~80%) - 산발적 업데이트
+                    double updateProbability = ThreadLocalRandom.current().nextDouble(0.3, 0.8);
+                    if (Math.random() < updateProbability) {
+                        updateIndividualStock(symbol);
+                    }
+                },
+                initialDelay, // 랜덤한 시작 지연
+                (long)(UPDATE_INTERVAL * 1000), // 0.8초를 밀리초로 변환
+                TimeUnit.MILLISECONDS
+            );
+            individualStockTimers.put(symbol, future);
+        }
+        
+        // 배치 전송 시작 (0.5초마다 - 빠른 반응)
+        batchSender = scheduler.scheduleAtFixedRate(
+            this::sendBatchUpdates,
+            500, // 0.5초 후 시작
+            500, // 0.5초마다 배치 전송
+            TimeUnit.MILLISECONDS
+        );
+        
+        System.out.println("✅ 산발적 업데이트 설정 완료: " + allSymbols.size() + "개 종목 (0.8초 주기, 30-80% 확률)");
+    }
+    
+    /**
+     * 간단한 캔들 매니저 초기화 (파이썬과 동일한 구조)
+     */
+    private void initializeSimpleCandleManager() {
+        System.out.println("📊 파이썬 스타일 간단한 캔들 매니저 초기화 시작...");
+        for (String symbol : companies.keySet()) {
+            double currentPrice = currentPrices.get(symbol);
+            candleManager.initializeStock(symbol, currentPrice);
+        }
+        System.out.println("✅ 파이썬 스타일 간단한 캔들 매니저 초기화 완료!");
+    }
+
+    /**
+     * 파이썬과 동일한 API: 샘플링된 데이터 조회
+     */
+    public List<List<Object>> getSampledData(String symbol, String period) {
+        return candleManager.getSampledData(symbol, period);
+    }
+    
+    /**
+     * 파이썬과 동일한 API: 현재 가격들 조회
+     */
+    public Map<String, Double> getCurrentPrices() {
+        return candleManager.getCurrentPrices();
+    }
+    
+    /**
+     * 파이썬과 동일한 API: 모든 종목 심볼 조회
+     */
+    public List<String> getAllStockSymbols() {
+        return new ArrayList<>(companies.keySet());
+    }
+    
+    /**
+     * 파이썬과 동일한 API: 간단한 캔들 데이터 조회
+     */
+    public List<Map<String, Object>> getSimpleCandles(String symbol, String period) {
+        List<SimpleCandleManager.CandleData> candles = candleManager.getCandles(symbol, period);
+        List<Map<String, Object>> result = new ArrayList<>();
+        
+        for (SimpleCandleManager.CandleData candle : candles) {
+            Map<String, Object> candleMap = new HashMap<>();
+            candleMap.put("time", candle.time);
+            candleMap.put("open", candle.open);
+            candleMap.put("high", candle.high);
+            candleMap.put("low", candle.low);
+            candleMap.put("close", candle.close);
+            candleMap.put("volume", candle.volume);
+            result.add(candleMap);
+        }
+        
+        return result;
+    }
+    
+    /**
+     * 캔들 형태의 데이터 조회 (Flutter 클라이언트용)
+     */
+    public List<Map<String, Object>> getCandleData(String symbol, String period) {
+        return candleManager.getCandleData(symbol, period);
+    }
+    
+    /**
+     * 고급 캔들 데이터 조회 (실제 OHLCV 계산)
+     */
+    public List<Map<String, Object>> getAdvancedCandleData(String symbol, String period) {
+        return candleManager.getAdvancedCandleData(symbol, period);
+    }
+
+    /**
+     * 개별 주식 업데이트 (파이썬과 동일한 로직)
+     */
+    private void updateIndividualStock(String symbol) {
+        try {
+            double currentPrice = currentPrices.get(symbol);
+            if (currentPrice <= 0) {
+                System.out.println("⚠️ [" + symbol + "] 현재 가격이 0 이하: " + currentPrice);
+                return;
+            }
+            
+            // 파이썬의 brownian_motion과 동일한 가격 생성
+            double newPrice = generateNextPrice(symbol, currentPrice);
+            
+            // 가격 변화 확인
+            double changePercent = ((newPrice - currentPrice) / currentPrice) * 100.0;
+            System.out.println("💰 [" + symbol + "] 가격 변동: " + String.format("%.2f", currentPrice) + " → " + String.format("%.2f", newPrice) + " (" + String.format("%.2f", changePercent) + "%)");
+            
+            // 가격 업데이트
+            currentPrices.put(symbol, newPrice);
+            
+            // 배치 업데이트에 추가
+            batchUpdates.put(symbol, newPrice);
+            
+            // 간단한 캔들 매니저에 가격 데이터 추가 (가상 시간 사용)
+            candleManager.addPricePoint(symbol, 0, newPrice); // timestamp는 무시하고 가상 시간 사용
+            
+        } catch (Exception e) {
+            System.err.println("❌ [" + symbol + "] 개별 주식 업데이트 실패: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+
+    
+    /**
+     * 배치 업데이트 전송 ([symbol, price, day%, week%, month%] 형태)
+     */
+    private void sendBatchUpdates() {
+        if (batchUpdates.isEmpty()) return;
+        
+        try {
+            List<List<Object>> data = new ArrayList<>();
+            for (Map.Entry<String, Double> entry : batchUpdates.entrySet()) {
+                String symbol = entry.getKey();
+                double newPrice = entry.getValue();
+                
+                // 기간별 변동률 계산
+                double dayChangePercent = calculateDayChangePercent(symbol, newPrice);
+                double weekChangePercent = calculateWeekChangePercent(symbol, newPrice);
+                double monthChangePercent = calculateMonthChangePercent(symbol, newPrice);
+                
+                // [symbol, price, day%, week%, month%] 형태로 데이터 추가
+                data.add(Arrays.asList(symbol, newPrice, dayChangePercent, weekChangePercent, monthChangePercent));
+            }
+            
+            Map<String, Object> batchMessage = new HashMap<>();
+            batchMessage.put("type", "ticker");
+            batchMessage.put("data", data);
+            
+            // 웹소켓으로 배치 전송
+            webSocketHandler.sendBatchUpdate(batchMessage);
+            
+            // 배치 크기 로그 출력
+            System.out.println("📦 배치 업데이트 전송: " + data.size() + "개 종목");
+            
+            // 이전 가격 업데이트 (다음 계산을 위해)
+            for (Map.Entry<String, Double> entry : batchUpdates.entrySet()) {
+                previousPrices.put(entry.getKey(), entry.getValue());
+            }
+            
+            // 배치 클리어
+            batchUpdates.clear();
+            
+        } catch (Exception e) {
+            System.err.println("❌ 배치 업데이트 전송 실패: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * 일봉 변동률 계산 (시가 기준)
+     */
+    private double calculateDayChangePercent(String symbol, double newPrice) {
+        double todayOpenPrice = todayOpenPrices.getOrDefault(symbol, newPrice);
+        if (todayOpenPrice == 0) return 0.0;
+        
+        double changePercent = ((newPrice - todayOpenPrice) / todayOpenPrice) * 100.0;
+        return Math.round(changePercent * 100.0) / 100.0;
+    }
+    
+    /**
+     * 주봉 변동률 계산 (1주일 전 기준)
+     */
+    private double calculateWeekChangePercent(String symbol, double newPrice) {
+        double weekAgoPrice = weekAgoPrices.getOrDefault(symbol, newPrice);
+        if (weekAgoPrice == 0) return 0.0;
+        
+        double changePercent = ((newPrice - weekAgoPrice) / weekAgoPrice) * 100.0;
+        return Math.round(changePercent * 100.0) / 100.0;
+    }
+    
+    /**
+     * 월봉 변동률 계산 (1개월 전 기준)
+     */
+    private double calculateMonthChangePercent(String symbol, double newPrice) {
+        double monthAgoPrice = monthAgoPrices.getOrDefault(symbol, newPrice);
+        if (monthAgoPrice == 0) return 0.0;
+        
+        double changePercent = ((newPrice - monthAgoPrice) / monthAgoPrice) * 100.0;
+        return Math.round(changePercent * 100.0) / 100.0;
+    }
+    
+    /**
+     * 변동률 계산 (전날 종가 기준) - 기존 호환성 유지
+     */
+    private double calculateChangePercent(String symbol, double newPrice) {
+        return calculateDayChangePercent(symbol, newPrice);
+    }
 
 }

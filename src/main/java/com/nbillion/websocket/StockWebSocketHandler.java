@@ -208,6 +208,47 @@ public class StockWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
+     * 배치 업데이트 전송 (파이썬과 동일한 구조)
+     */
+    public void sendBatchUpdate(Map<String, Object> batchMessage) {
+        // 구독자가 없으면 전송하지 않음
+        if (allStocksSubscribers.isEmpty()) {
+            return;
+        }
+        
+        try {
+            String messageJson = objectMapper.writeValueAsString(batchMessage);
+            @SuppressWarnings("unchecked")
+            List<List<Object>> data = (List<List<Object>>) batchMessage.get("data");
+            System.out.println("📦 [배치] 웹소켓 메시지 전송: " + data.size() + "개 종목 (구독자: " + allStocksSubscribers.size() + "명)");
+            
+            // 모든 구독자에게 전송
+            int successCount = 0;
+            int failCount = 0;
+            
+            for (WebSocketSession session : allStocksSubscribers) {
+                try {
+                    if (session.isOpen()) {
+                        session.sendMessage(new TextMessage(messageJson));
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                } catch (Exception e) {
+                    System.err.println("❌ 세션 전송 실패: " + e.getMessage());
+                    failCount++;
+                }
+            }
+            
+            System.out.println("📦 배치 전송 완료: 성공 " + successCount + "개, 실패 " + failCount + "개");
+            
+        } catch (Exception e) {
+            System.err.println("❌ 배치 업데이트 JSON 직렬화 실패: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
      * 개별 세션에 메시지 전송
      */
     private void sendMessage(WebSocketSession session, String message) {

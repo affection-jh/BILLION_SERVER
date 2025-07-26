@@ -10,6 +10,9 @@ import com.nbillion.service.StockService;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.Arrays;
+import org.springframework.http.HttpStatus;
 
 /**
  * 주식 데이터 관련 컨트롤러
@@ -341,66 +344,271 @@ public class StockController {
         }
     }
 
+
     /**
-     * 지원하는 차트 기간 목록 조회
+     * 지원하는 차트 기간 목록 조회 (간단한 버전)
+     * GET /api/stocks/chart/periods
      */
     @GetMapping("/chart/periods")
     public ResponseEntity<List<String>> getSupportedPeriods() {
-        List<String> periods = List.of("1min", "5min", "10min", "30min", "60min", "1day", "1week", "1month");
+        List<String> periods = List.of("1min", "5min", "10min", "30min", "60min", "1hour", "1day");
         return ResponseEntity.ok(periods);
     }
 
     /**
-     * 전체 종목 목록 조회 (페이지네이션)
+     * 모든 주식 조회 (페이징 지원)
      */
-    @GetMapping("/stocks/all")
+    @GetMapping("/all")
     public ResponseEntity<Map<String, Object>> getAllStocks(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        
-        List<Company> allStocks = stockService.getAllStocks(page, size);
-        int totalCount = stockService.getTotalStockCount();
-        int totalPages = (int) Math.ceil((double) totalCount / size);
-        
-        Map<String, Object> response = new HashMap<>();
-        response.put("stocks", allStocks);
-        response.put("page", page);
-        response.put("size", size);
-        response.put("totalElements", totalCount);
-        response.put("totalPages", totalPages);
-        response.put("hasNext", page < totalPages - 1);
-        response.put("hasPrevious", page > 0);
-        
-        return ResponseEntity.ok(response);
+        try {
+            List<Company> allStocks = stockService.getAllStocks(page, size);
+            int totalCount = stockService.getTotalStockCount();
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("stocks", allStocks);
+            response.put("page", page);
+            response.put("size", size);
+            response.put("totalCount", totalCount);
+            response.put("hasNext", (page + 1) * size < totalCount);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("error", "서버 내부 오류 발생");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(errorResponse);
+        }
     }
-    
+
     /**
-     * 전체 종목 목록 조회 (구독 정보 포함)
+     * 모든 주식 조회 + WebSocket 구독 정보 포함
      */
-    @GetMapping("/stocks/all/with-subscription")
+    @GetMapping("/all/with-subscription")
     public ResponseEntity<Map<String, Object>> getAllStocksWithSubscription(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        
-        List<Company> allStocks = stockService.getAllStocks(page, size);
-        int totalCount = stockService.getTotalStockCount();
-        int totalPages = (int) Math.ceil((double) totalCount / size);
-        
-        Map<String, Object> response = new HashMap<>();
-        response.put("stocks", allStocks);
-        response.put("page", page);
-        response.put("size", size);
-        response.put("totalElements", totalCount);
-        response.put("totalPages", totalPages);
-        response.put("hasNext", page < totalPages - 1);
-        response.put("hasPrevious", page > 0);
-        response.put("subscription", Map.of(
-            "type", "subscribe_all_stocks",
-            "description", "전체 종목 실시간 구독 (5초마다 업데이트)"
-        ));
-        
-        return ResponseEntity.ok(response);
+        try {
+            List<Company> allStocks = stockService.getAllStocks(page, size);
+            int totalCount = stockService.getTotalStockCount();
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("stocks", allStocks);
+            response.put("page", page);
+            response.put("size", size);
+            response.put("totalCount", totalCount);
+            response.put("hasNext", (page + 1) * size < totalCount);
+            response.put("websocket_subscription", Map.of(
+                "url", "ws://localhost:8080/ws/stocks",
+                "message", Map.of(
+                    "type", "subscribe_all"
+                ),
+                "description", "이 메시지를 WebSocket으로 전송하면 모든 종목의 실시간 데이터를 받을 수 있습니다."
+            ));
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("error", "서버 내부 오류 발생");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(errorResponse);
+        }
     }
+
+    /**
+     * 파이썬과 동일한 API: 샘플링된 가격 데이터 [timestamp, price] 형태
+     * GET /api/stocks/{symbol}/{period}
+     */
+    @GetMapping("/{symbol}/{period}")
+    public ResponseEntity<List<List<Object>>> getStockHistory(
+            @PathVariable String symbol,
+            @PathVariable String period) {
+        try {
+            List<List<Object>> historyData = stockService.getSampledData(symbol, period);
+            return ResponseEntity.ok(historyData);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(new ArrayList<>());
+        }
+    }
+    
+    /**
+     * 파이썬과 동일한 API: 현재 가격들
+     * GET /api/stocks/current_prices
+     */
+    @GetMapping("/current_prices")
+    public ResponseEntity<Map<String, Double>> getCurrentPrices() {
+        try {
+            Map<String, Double> prices = stockService.getCurrentPrices();
+            return ResponseEntity.ok(prices);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(new HashMap<>());
+        }
+    }
+
+    /**
+     * 파이썬과 동일한 API: 초기 가격들
+     * GET /api/stocks/initial_prices
+     */
+    @GetMapping("/initial_prices")
+    public ResponseEntity<Map<String, Map<String, Double>>> getInitialPrices() {
+        try {
+            Map<String, Map<String, Double>> result = new HashMap<>();
+            List<String> periods = Arrays.asList("day", "week", "month", "quarter");
+            
+            for (String symbol : stockService.getAllStockSymbols()) {
+                Map<String, Double> symbolPrices = new HashMap<>();
+                for (String period : periods) {
+                    List<List<Object>> sampledData = stockService.getSampledData(symbol, period);
+                    if (!sampledData.isEmpty()) {
+                        symbolPrices.put(period, (Double) sampledData.get(0).get(1));
+                    }
+                }
+                result.put(symbol, symbolPrices);
+            }
+            
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(new HashMap<>());
+        }
+    }
+
+   
+
+    // ==============================================================================
+    // 독립적인 캔들 기간 엔드포인트들
+    // ==============================================================================
+    
+    /**
+     * 1분봉
+     * GET /api/stocks/{symbol}/chart/1min?page=0&size=30
+     */
+    @GetMapping("/{symbol}/chart/1min")
+    public ResponseEntity<Map<String, Object>> getChart1Min(
+            @PathVariable String symbol,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "30") int size) {
+        return getChartDataByPeriod(symbol, "1min", "1min", page, size);
+    }
+    
+    /**
+     * 5분봉
+     * GET /api/stocks/{symbol}/chart/5min?page=0&size=30
+     */
+    @GetMapping("/{symbol}/chart/5min")
+    public ResponseEntity<Map<String, Object>> getChart5Min(
+            @PathVariable String symbol,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "30") int size) {
+        return getChartDataByPeriod(symbol, "5min", "5min", page, size);
+    }
+    
+    /**
+     * 10분봉
+     * GET /api/stocks/{symbol}/chart/10min?page=0&size=30
+     */
+    @GetMapping("/{symbol}/chart/10min")
+    public ResponseEntity<Map<String, Object>> getChart10Min(
+            @PathVariable String symbol,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "30") int size) {
+        return getChartDataByPeriod(symbol, "10min", "10min", page, size);
+    }
+    
+    /**
+     * 30분봉
+     * GET /api/stocks/{symbol}/chart/30min?page=0&size=30
+     */
+    @GetMapping("/{symbol}/chart/30min")
+    public ResponseEntity<Map<String, Object>> getChart30Min(
+            @PathVariable String symbol,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "30") int size) {
+        return getChartDataByPeriod(symbol, "30min", "30min", page, size);
+    }
+    
+    /**
+     * 60분봉
+     * GET /api/stocks/{symbol}/chart/60min?page=0&size=30
+     */
+    @GetMapping("/{symbol}/chart/60min")
+    public ResponseEntity<Map<String, Object>> getChart60Min(
+            @PathVariable String symbol,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "30") int size) {
+        return getChartDataByPeriod(symbol, "60min", "60min", page, size);
+    }
+    
+    /**
+     * 1시간봉
+     * GET /api/stocks/{symbol}/chart/1hour?page=0&size=30
+     */
+    @GetMapping("/{symbol}/chart/1hour")
+    public ResponseEntity<Map<String, Object>> getChart1Hour(
+            @PathVariable String symbol,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "30") int size) {
+        return getChartDataByPeriod(symbol, "1hour", "1hour", page, size);
+    }
+    
+    /**
+     * 1일봉
+     * GET /api/stocks/{symbol}/chart/1day?page=0&size=30
+     */
+    @GetMapping("/{symbol}/chart/1day")
+    public ResponseEntity<Map<String, Object>> getChart1Day(
+            @PathVariable String symbol,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "30") int size) {
+        return getChartDataByPeriod(symbol, "1day", "1day", page, size);
+    }
+
+    /**
+     * 공통 차트 데이터 조회 메서드 (페이지네이션 포함)
+     */
+    private ResponseEntity<Map<String, Object>> getChartDataByPeriod(String symbol, String fullPeriod, String displayPeriod, int page, int size) {
+        try {
+            List<Map<String, Object>> allData = stockService.getCandleData(symbol, fullPeriod);
+            
+            // 페이지네이션 계산
+            int totalCount = allData.size();
+            int totalPages = (int) Math.ceil((double) totalCount / size);
+            int startIndex = page * size;
+            int endIndex = Math.min(startIndex + size, totalCount);
+            
+            // 페이지 데이터 추출
+            List<Map<String, Object>> pageData = new ArrayList<>();
+            if (startIndex < totalCount) {
+                pageData = allData.subList(startIndex, endIndex);
+            }
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("symbol", symbol);
+            response.put("period", displayPeriod);
+            response.put("data", pageData);
+            response.put("count", pageData.size());
+            response.put("totalCount", totalCount);
+            response.put("page", page);
+            response.put("size", size);
+            response.put("totalPages", totalPages);
+            response.put("hasNext", page < totalPages - 1);
+            response.put("hasPrevious", page > 0);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("error", "서버 내부 오류 발생");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(errorResponse);
+        }
+    }
+
 
   
 }

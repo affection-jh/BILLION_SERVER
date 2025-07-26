@@ -207,5 +207,46 @@ public class StockService {
         return simulator.getTotalStockCount();
     }
 
+    /**
+     * 파이썬과 동일한 API: 샘플링된 데이터 조회
+     */
+    public List<List<Object>> getSampledData(String symbol, String period) {
+        return simulator.getSampledData(symbol, period);
+    }
+    
+    /**
+     * 파이썬과 동일한 API: 현재 가격들 조회
+     */
+    public Map<String, Double> getCurrentPrices() {
+        return simulator.getCurrentPrices();
+    }
+    
+    /**
+     * 파이썬과 동일한 API: 모든 종목 심볼 조회
+     */
+    public List<String> getAllStockSymbols() {
+        return simulator.getAllStockSymbols();
+    }
+    
+    /**
+     * 파이썬과 동일한 API: 간단한 캔들 데이터 조회
+     */
+    public List<Map<String, Object>> getSimpleCandles(String symbol, String period) {
+        return simulator.getSimpleCandles(symbol, period);
+    }
+    
+    /**
+     * 캔들 형태의 데이터 조회 (Flutter 클라이언트용)
+     */
+    public List<Map<String, Object>> getCandleData(String symbol, String period) {
+        return simulator.getCandleData(symbol, period);
+    }
+    
+    /**
+     * 고급 캔들 데이터 조회 (실제 OHLCV 계산)
+     */
+    public List<Map<String, Object>> getAdvancedCandleData(String symbol, String period) {
+        return simulator.getAdvancedCandleData(symbol, period);
+    }
 
 }
