@@ -1,0 +1,317 @@
+[
+  {
+    "symbol": "XPL",
+    "name": "Xplode AI",
+    "sector": "Technology",
+    "description": "A cutting-edge generative AI startup",
+    "initialPrice": 100.0,
+    "isTrending": true,
+    "isRecommended": true
+  },
+  {
+    "symbol": "ZNT",
+    "name": "Zenith Tech",
+    "sector": "Technology",
+    "description": "Cloud computing and cybersecurity solutions",
+    "initialPrice": 85.0,
+    "isTrending": true,
+    "isRecommended": true
+  },
+  {
+    "symbol": "ABC",
+    "name": "Alpha Blockchain",
+    "sector": "Technology",
+    "description": "Blockchain infrastructure and DeFi platform",
+    "initialPrice": 120.0,
+    "isTrending": true,
+    "isRecommended": true
+  },
+  {
+    "symbol": "DEF",
+    "name": "Digital Edge",
+    "sector": "Technology",
+    "description": "Edge computing and IoT solutions",
+    "initialPrice": 95.0,
+    "isTrending": true,
+    "isRecommended": true
+  },
+  {
+    "symbol": "GHI",
+    "name": "Green Hydrogen",
+    "sector": "Energy",
+    "description": "Clean energy and hydrogen technology",
+    "initialPrice": 75.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "JKL",
+    "name": "Jupiter Labs",
+    "sector": "Technology",
+    "description": "Quantum computing and AI research",
+    "initialPrice": 180.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "MNO",
+    "name": "Meta Networks",
+    "sector": "Technology",
+    "description": "Social media and metaverse platform",
+    "initialPrice": 150.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "PQR",
+    "name": "Pixel Robotics",
+    "sector": "Technology",
+    "description": "Advanced robotics and automation",
+    "initialPrice": 110.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "STU",
+    "name": "Solar Tech",
+    "sector": "Energy",
+    "description": "Solar energy and smart grid solutions",
+    "initialPrice": 65.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "VWX",
+    "name": "Virtual Worlds",
+    "sector": "Technology",
+    "description": "VR/AR technology and gaming",
+    "initialPrice": 90.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "BCD",
+    "name": "BioTech Dynamics",
+    "sector": "Healthcare",
+    "description": "Biotechnology and pharmaceutical research",
+    "initialPrice": 140.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "EFG",
+    "name": "Eco Finance",
+    "sector": "Finance",
+    "description": "Sustainable finance and green investments",
+    "initialPrice": 45.0,
+    "isTrending": false,
+    "isRecommended": false
+  },
+  {
+    "symbol": "HIJ",
+    "name": "HealthTech Innovations",
+    "sector": "Healthcare",
+    "description": "Digital health and telemedicine",
+    "initialPrice": 85.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "KLM",
+    "name": "Krypto Mining",
+    "sector": "Technology",
+    "description": "Cryptocurrency mining and blockchain",
+    "initialPrice": 70.0,
+    "isTrending": false,
+    "isRecommended": false
+  },
+  {
+    "symbol": "NOP",
+    "name": "Neural Optics",
+    "sector": "Healthcare",
+    "description": "Medical imaging and AI diagnostics",
+    "initialPrice": 95.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "QRS",
+    "name": "Quantum Systems",
+    "sector": "Technology",
+    "description": "Quantum computing hardware",
+    "initialPrice": 160.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "TUV",
+    "name": "Transport Unlimited",
+    "sector": "Transportation",
+    "description": "Electric vehicles and autonomous driving",
+    "initialPrice": 80.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "WXY",
+    "name": "Wearable Tech",
+    "sector": "Technology",
+    "description": "Smart wearables and health monitoring",
+    "initialPrice": 55.0,
+    "isTrending": false,
+    "isRecommended": false
+  },
+  {
+    "symbol": "ZAB",
+    "name": "Zero Carbon",
+    "sector": "Energy",
+    "description": "Carbon capture and renewable energy",
+    "initialPrice": 60.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "CDE",
+    "name": "Cyber Defense",
+    "sector": "Technology",
+    "description": "Cybersecurity and threat intelligence",
+    "initialPrice": 130.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "FGH",
+    "name": "Future Homes",
+    "sector": "Real Estate",
+    "description": "Smart home technology and IoT",
+    "initialPrice": 75.0,
+    "isTrending": false,
+    "isRecommended": false
+  },
+  {
+    "symbol": "IJK",
+    "name": "Internet of Things",
+    "sector": "Technology",
+    "description": "IoT platform and connected devices",
+    "initialPrice": 90.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "LMN",
+    "name": "Logistics Master",
+    "sector": "Transportation",
+    "description": "Supply chain and logistics optimization",
+    "initialPrice": 70.0,
+    "isTrending": false,
+    "isRecommended": false
+  },
+  {
+    "symbol": "OPQ",
+    "name": "Ocean Power",
+    "sector": "Energy",
+    "description": "Wave and tidal energy generation",
+    "initialPrice": 50.0,
+    "isTrending": false,
+    "isRecommended": false
+  },
+  {
+    "symbol": "RST",
+    "name": "Robo Surgery",
+    "sector": "Healthcare",
+    "description": "Robotic surgery and medical automation",
+    "initialPrice": 200.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "UVW",
+    "name": "Urban Vision",
+    "sector": "Technology",
+    "description": "Smart city and urban planning",
+    "initialPrice": 85.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "XYZ",
+    "name": "Xenon Labs",
+    "sector": "Technology",
+    "description": "Advanced materials and nanotechnology",
+    "initialPrice": 110.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "AAA",
+    "name": "Auto AI",
+    "sector": "Transportation",
+    "description": "Autonomous vehicle technology",
+    "initialPrice": 95.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "BBB",
+    "name": "Bio Battery",
+    "sector": "Energy",
+    "description": "Biological battery and energy storage",
+    "initialPrice": 65.0,
+    "isTrending": false,
+    "isRecommended": false
+  },
+  {
+    "symbol": "CCC",
+    "name": "Cloud Connect",
+    "sector": "Technology",
+    "description": "Cloud infrastructure and services",
+    "initialPrice": 120.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "DDD",
+    "name": "Data Dynamics",
+    "sector": "Technology",
+    "description": "Big data analytics and machine learning",
+    "initialPrice": 140.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "EEE",
+    "name": "Eco Energy",
+    "sector": "Energy",
+    "description": "Renewable energy and sustainability",
+    "initialPrice": 55.0,
+    "isTrending": false,
+    "isRecommended": false
+  },
+  {
+    "symbol": "FFF",
+    "name": "Future Finance",
+    "sector": "Finance",
+    "description": "Fintech and digital banking",
+    "initialPrice": 85.0,
+    "isTrending": false,
+    "isRecommended": true
+  },
+  {
+    "symbol": "GGG",
+    "name": "Green Growth",
+    "sector": "Energy",
+    "description": "Environmental technology and consulting",
+    "initialPrice": 45.0,
+    "isTrending": false,
+    "isRecommended": false
+  },
+  {
+    "symbol": "HHH",
+    "name": "Health Hub",
+    "sector": "Healthcare",
+    "description": "Healthcare platform and patient care",
+    "initialPrice": 75.0,
+    "isTrending": false,
+    "isRecommended": true
+  }
+] 

@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>주식 시뮬레이션 서버 - 50개 종목 실시간</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+        }
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+        }
+        .nav-tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .nav-tab {
+            flex: 1;
+            padding: 15px 20px;
+            text-align: center;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 16px;
+            font-weight: bold;
+            color: #666;
+            transition: all 0.3s;
+        }
+        .nav-tab.active {
+            background: #667eea;
+            color: white;
+        }
+        .nav-tab:hover:not(.active) {
+            background: #e9ecef;
+        }
+        .tab-content {
+            display: none;
+            padding: 20px;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+        .button:hover {
+            background: #5a6fd8;
+        }
+        .button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .stocks-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .stock-card {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        .stock-card:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            transform: translateY(-2px);
+        }
+        .stock-card.price-updated {
+            border: 2px solid #28a745;
+            box-shadow: 0 0 10px rgba(40, 167, 69, 0.3);
+            animation: priceFlash 0.8s ease-out;
+        }
+        .stock-card.price-down {
+            border: 2px solid #dc3545;
+            box-shadow: 0 0 10px rgba(220, 53, 69, 0.3);
+            animation: priceFlash 0.8s ease-out;
+        }
+        @keyframes priceFlash {
+            0% { 
+                transform: scale(1.02);
+                box-shadow: 0 0 15px rgba(40, 167, 69, 0.5);
+            }
+            50% { 
+                transform: scale(1.01);
+            }
+            100% { 
+                transform: scale(1);
+                box-shadow: 0 0 5px rgba(40, 167, 69, 0.2);
+            }
+        }
+        .stock-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .stock-symbol {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+        }
+        .stock-price {
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .stock-change {
+            font-size: 14px;
+            font-weight: bold;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        .positive {
+            color: #28a745;
+            background: rgba(40, 167, 69, 0.1);
+        }
+        .negative {
+            color: #dc3545;
+            background: rgba(220, 53, 69, 0.1);
+        }
+        .stock-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            font-size: 12px;
+            color: #666;
+        }
+        .stock-info span {
+            display: flex;
+            justify-content: space-between;
+        }
+        .chart-container {
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .chart-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            align-items: center;
+        }
+        .chart-controls select {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .log {
+            background: #000;
+            color: #0f0;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📈 주식 시뮬레이션 서버</h1>
+            <p>50개 종목 실시간 데이터 & 차트 분석</p>
+            <a href="/api/stocks" class="api-link" target="_blank">API 문서 보기</a>
+        </div>
+
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="showTab('home')">🏠 홈화면 (10개)</button>
+            <button class="nav-tab" onclick="showTab('all')">📊 전체 종목 (50개)</button>
+            <button class="nav-tab" onclick="showTab('chart')">📈 차트 분석</button>
+            <button class="nav-tab" onclick="showTab('detail')">🔍 상세보기</button>
+        </div>
+
+        <!-- 홈화면 탭 -->
+        <div id="home" class="tab-content active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="homeStockCount">0</div>
+                    <div class="stat-label">홈화면 종목</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="homeUpdateFreq">0.3초</div>
+                    <div class="stat-label">업데이트 주기</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="homeConnection">연결 중...</div>
+                    <div class="stat-label">WebSocket 상태</div>
+                </div>
+            </div>
+            
+            <div class="stocks-grid" id="homeStocksGrid">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    홈화면 종목 로딩 중...
+                </div>
+            </div>
+        </div>
+
+        <!-- 전체 종목 탭 -->
+        <div id="all" class="tab-content">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="allStockCount">0</div>
+                    <div class="stat-label">전체 종목</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="allUpdateFreq">5초</div>
+                    <div class="stat-label">업데이트 주기</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="allConnection">연결 중...</div>
+                    <div class="stat-label">WebSocket 상태</div>
+                </div>
+            </div>
+            
+            <div class="stocks-grid" id="allStocksGrid">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    전체 종목 로딩 중...
+                </div>
+            </div>
+        </div>
+
+        <!-- 차트 분석 탭 -->
+        <div id="chart" class="tab-content">
+            <div class="chart-controls">
+                <label>종목 선택:</label>
+                <select id="chartSymbol">
+                    <option value="">종목을 선택하세요</option>
+                </select>
+                <label>기간:</label>
+                <select id="chartPeriod">
+                    <option value="1min">1분</option>
+                    <option value="5min">5분</option>
+                    <option value="10min">10분</option>
+                    <option value="30min">30분</option>
+                    <option value="60min">60분</option>
+                </select>
+                <button class="button" onclick="loadChart()">차트 로드</button>
+            </div>
+            
+            <div class="chart-container">
+                <canvas id="priceChart" width="800" height="400"></canvas>
+            </div>
+        </div>
+
+        <!-- 상세보기 탭 -->
+        <div id="detail" class="tab-content">
+            <div class="input-group">
+                <label>종목 심볼:</label>
+                <input type="text" id="detailSymbol" placeholder="예: AAPL">
+                <button class="button" onclick="loadDetail()">상세 정보 조회</button>
+            </div>
+            
+            <div id="detailResult" class="data-display">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    상세 정보를 조회하세요...
+                </div>
+            </div>
+        </div>
+
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let homeStocks = {};  // 객체로 변경하여 종목별 데이터 관리
+        let allStocks = {};   // 객체로 변경하여 종목별 데이터 관리
+        let priceChart = null;
+
+        // 탭 전환
+        function showTab(tabName) {
+            document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById(tabName).classList.add('active');
+            
+            if (tabName === 'home') {
+                subscribeAllStocks(); // 홈화면 탭에서도 전체 구독
+                loadInitialAllStocks();
+            } else if (tabName === 'all') {
+                subscribeAllStocks();
+                loadInitialAllStocks();
+            }
+        }
+
+        // WebSocket 연결
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/stocks`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = function() {
+                log('WebSocket 연결됨');
+                document.getElementById('homeConnection').textContent = '연결됨';
+                document.getElementById('allConnection').textContent = '연결됨';
+                subscribeAllStocks();
+                loadInitialAllStocks();
+            };
+            
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+            
+            ws.onclose = function() {
+                log('WebSocket 연결 끊어짐');
+                document.getElementById('homeConnection').textContent = '연결 끊어짐';
+                document.getElementById('allConnection').textContent = '연결 끊어짐';
+                setTimeout(connectWebSocket, 3000);
+            };
+            
+            ws.onerror = function(error) {
+                log('WebSocket 에러: ' + error);
+            };
+        }
+
+        // 전체 종목 구독 (35개 모두)
+        function subscribeAllStocks() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({type: 'subscribe_all'}));
+                log('전체 종목 구독 요청 (35개)');
+            }
+        }
+
+        // 초기 전체 종목 로드
+        async function loadInitialAllStocks() {
+            try {
+                const response = await fetch('/api/stocks/stocks/all?page=0&size=50');
+                const data = await response.json();
+                
+                // 모든 종목을 홈화면과 전체 종목 둘 다에 저장
+                data.stocks.forEach(stock => {
+                    const stockData = {
+                        symbol: stock.symbol,
+                        name: stock.name,
+                        price: stock.close || 1000,
+                        change: 0,
+                        lastUpdated: Date.now()
+                    };
+                    
+                    allStocks[stock.symbol] = stockData;
+                    homeStocks[stock.symbol] = {...stockData}; // 홈화면에도 동일하게
+                });
+                
+                document.getElementById('homeStockCount').textContent = Object.keys(homeStocks).length;
+                document.getElementById('allStockCount').textContent = Object.keys(allStocks).length;
+                
+                renderHomeStocks();
+                renderAllStocks();
+                updateChartSymbols();
+                
+            } catch (error) {
+                console.error('초기 종목 로드 실패:', error);
+            }
+        }
+
+        // WebSocket 메시지 처리
+        function handleWebSocketMessage(data) {
+            if (data.type === 'ticker') {
+                // 모든 ticker 메시지를 홈화면과 전체 종목 둘 다 업데이트
+                updateStocks(data.data);
+            }
+        }
+
+        // 종목 업데이트 (홈화면과 전체 종목 동시)
+        function updateStocks(tickerData) {
+            tickerData.forEach(item => {
+                const symbol = item[0];
+                const price = parseFloat(item[1]);
+                const change = parseFloat(item[2]);
+                
+                // 홈화면 종목 업데이트
+                if (homeStocks[symbol]) {
+                    const oldPrice = homeStocks[symbol].price;
+                    homeStocks[symbol].price = price;
+                    homeStocks[symbol].change = change;
+                    homeStocks[symbol].lastUpdated = Date.now();
+                    
+                    // 가격 변화 효과 적용
+                    showPriceChangeEffect('homeStocksGrid', symbol, price > oldPrice);
+                }
+                
+                // 전체 종목 업데이트
+                if (allStocks[symbol]) {
+                    const oldPrice = allStocks[symbol].price;
+                    allStocks[symbol].price = price;
+                    allStocks[symbol].change = change;
+                    allStocks[symbol].lastUpdated = Date.now();
+                    
+                    // 가격 변화 효과 적용
+                    showPriceChangeEffect('allStocksGrid', symbol, price > oldPrice);
+                }
+            });
+            
+            // 두 화면 모두 렌더링
+            renderHomeStocks();
+            renderAllStocks();
+        }
+
+        // 가격 변화 효과 표시
+        function showPriceChangeEffect(containerId, symbol, isUp) {
+            const container = document.getElementById(containerId);
+            const stockCard = container.querySelector(`[data-symbol="${symbol}"]`);
+            
+            if (stockCard) {
+                // 기존 클래스 제거
+                stockCard.classList.remove('price-updated', 'price-down');
+                
+                // 새로운 클래스 추가
+                if (isUp) {
+                    stockCard.classList.add('price-updated');
+                } else {
+                    stockCard.classList.add('price-down');
+                }
+                
+                // 0.8초 후 클래스 제거
+                setTimeout(() => {
+                    stockCard.classList.remove('price-updated', 'price-down');
+                }, 800);
+            }
+        }
+
+        // 홈화면 종목 렌더링
+        function renderHomeStocks() {
+            const container = document.getElementById('homeStocksGrid');
+            const stocksArray = Object.values(homeStocks);
+            
+            if (stocksArray.length === 0) {
+                container.innerHTML = '<div class="loading"><div class="spinner"></div>홈화면 종목 로딩 중...</div>';
+                return;
+            }
+            
+            container.innerHTML = stocksArray.map(stock => `
+                <div class="stock-card" data-symbol="${stock.symbol}">
+                    <div class="stock-header">
+                        <div class="stock-symbol">${stock.symbol}</div>
+                        <div class="stock-price">₩${stock.price.toLocaleString()}</div>
+                    </div>
+                    <div class="stock-change ${stock.change >= 0 ? 'positive' : 'negative'}">
+                        ${stock.change >= 0 ? '+' : ''}${stock.change.toFixed(2)}%
+                    </div>
+                    <div class="stock-info">
+                        <span>
+                            <span>종목명:</span>
+                            <span>${stock.name || stock.symbol}</span>
+                        </span>
+                        <span>
+                            <span>현재가:</span>
+                            <span>₩${stock.price.toLocaleString()}</span>
+                        </span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 전체 종목 렌더링
+        function renderAllStocks() {
+            const container = document.getElementById('allStocksGrid');
+            const stocksArray = Object.values(allStocks);
+            
+            if (stocksArray.length === 0) {
+                container.innerHTML = '<div class="loading"><div class="spinner"></div>전체 종목 로딩 중...</div>';
+                return;
+            }
+            
+            container.innerHTML = stocksArray.map(stock => `
+                <div class="stock-card" data-symbol="${stock.symbol}">
+                    <div class="stock-header">
+                        <div class="stock-symbol">${stock.symbol}</div>
+                        <div class="stock-price">₩${stock.price.toLocaleString()}</div>
+                    </div>
+                    <div class="stock-change ${stock.change >= 0 ? 'positive' : 'negative'}">
+                        ${stock.change >= 0 ? '+' : ''}${stock.change.toFixed(2)}%
+                    </div>
+                    <div class="stock-info">
+                        <span>
+                            <span>종목명:</span>
+                            <span>${stock.name || stock.symbol}</span>
+                        </span>
+                        <span>
+                            <span>현재가:</span>
+                            <span>₩${stock.price.toLocaleString()}</span>
+                        </span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 차트 종목 목록 업데이트
+        function updateChartSymbols() {
+            const select = document.getElementById('chartSymbol');
+            const currentValue = select.value;
+            
+            select.innerHTML = '<option value="">종목을 선택하세요</option>';
+            Object.values(allStocks).forEach(stock => {
+                const option = document.createElement('option');
+                option.value = stock.symbol;
+                option.textContent = `${stock.symbol} (₩${stock.price.toLocaleString()})`;
+                select.appendChild(option);
+            });
+            
+            if (currentValue) {
+                select.value = currentValue;
+            }
+        }
+
+        // 차트 로드
+        async function loadChart() {
+            const symbol = document.getElementById('chartSymbol').value;
+            const period = document.getElementById('chartPeriod').value;
+            
+            if (!symbol) {
+                alert('종목을 선택하세요.');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/stocks/${symbol}/chart?period=${period}&page=0&size=100`);
+                const data = await response.json();
+                
+                if (data.data && data.data.length > 0) {
+                    renderChart(data.data, symbol, period);
+                } else {
+                    alert('차트 데이터를 불러올 수 없습니다.');
+                }
+            } catch (error) {
+                console.error('차트 로드 에러:', error);
+                alert('차트 로드 중 오류가 발생했습니다.');
+            }
+        }
+
+        // 차트 렌더링
+        function renderChart(chartData, symbol, period) {
+            const ctx = document.getElementById('priceChart').getContext('2d');
+            
+            if (priceChart) {
+                priceChart.destroy();
+            }
+            
+            const labels = chartData.map(candle => {
+                const date = new Date(candle.timestamp);
+                return date.toLocaleTimeString();
+            });
+            
+            const prices = chartData.map(candle => candle.close);
+            
+            priceChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: `${symbol} 가격 (${period})`,
+                        data: prices,
+                        borderColor: '#667eea',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `${symbol} 가격 차트 (${period})`
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            ticks: {
+                                callback: function(value) {
+                                    return '₩' + value.toLocaleString();
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 상세 정보 로드
+        async function loadDetail() {
+            const symbol = document.getElementById('detailSymbol').value;
+            
+            if (!symbol) {
+                alert('종목 심볼을 입력하세요.');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/stocks/${symbol}`);
+                const data = await response.json();
+                
+                if (data) {
+                    document.getElementById('detailResult').innerHTML = `
+                        <h3>${data.name} (${data.symbol})</h3>
+                        <div class="stock-info">
+                            <span><strong>섹터:</strong> ${data.sector}</span>
+                            <span><strong>설명:</strong> ${data.description}</span>
+                            <span><strong>PER:</strong> ${data.per}</span>
+                            <span><strong>PBR:</strong> ${data.pbr}</span>
+                            <span><strong>PSR:</strong> ${data.psr}</span>
+                        </div>
+                    `;
+                } else {
+                    document.getElementById('detailResult').innerHTML = '<div class="loading">종목을 찾을 수 없습니다.</div>';
+                }
+            } catch (error) {
+                console.error('상세 정보 로드 에러:', error);
+                document.getElementById('detailResult').innerHTML = '<div class="loading">오류가 발생했습니다.</div>';
+            }
+        }
+
+        // 로그 출력
+        function log(message) {
+            const logElement = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.innerHTML += `[${timestamp}] ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        // 페이지 로드 시 초기화
+        window.onload = function() {
+            connectWebSocket();
+            log('페이지 로드됨');
+        };
+    </script>
+</body>
+</html>
